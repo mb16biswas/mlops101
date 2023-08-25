@@ -1,11 +1,15 @@
-import argparse
+
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, average_precision_score, accuracy_score, precision_score, recall_score, \
     f1_score
 from sklearn.model_selection import train_test_split
-import joblib
+import mlflow
+import datetime
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.neighbors import KNeighborsClassifier
+
 
 # Consts
 CLASS_LABEL = 'MachineLearning'
@@ -34,10 +38,70 @@ def fit_tfidf(train_df, test_df):
     return train_tfidf, test_tfidf, tfidf
 
 
-def fit_model(train_X, train_y, random_state=42):
-    clf_tfidf = LogisticRegression(solver='sag', random_state=random_state)
-    clf_tfidf.fit(train_X, train_y)
-    return clf_tfidf
+def fit_model(train_X, train_y, test_X, test_y, random_state=42,register = True):
+
+     with mlflow.start_run():
+        
+    
+        
+        tol = 0.001
+        C = 1.2
+        
+        clf_tfidf = LogisticRegression( tol = tol, C = C, random_state=random_state)
+        clf_tfidf.fit(train_X, train_y)
+
+        train_metrics = eval_model(clf_tfidf, train_X, train_y)
+
+        print("results on Train dataset")
+        print(train_metrics)
+
+        mlflow.log_metric("train roc_auc", train_metrics["roc_auc"])
+        mlflow.log_metric("train average_precision", train_metrics["average_precision"])
+        mlflow.log_metric("train accuracy", train_metrics["accuracy"])
+        mlflow.log_metric("train precision", train_metrics["precision"])
+        mlflow.log_metric("train recall", train_metrics['recall'])
+        mlflow.log_metric("train f1", train_metrics["f1"])
+
+
+
+
+
+        val_metrics = eval_model(clf_tfidf, test_X, test_y)
+
+
+        mlflow.log_param("tol ", tol)
+        mlflow.log_param("C ", C)
+
+        mlflow.log_metric("val roc_auc", val_metrics["roc_auc"])
+        mlflow.log_metric("val average_precision", val_metrics["average_precision"])
+        mlflow.log_metric("val accuracy", val_metrics["accuracy"])
+        mlflow.log_metric("val precision", val_metrics["precision"])
+        mlflow.log_metric("val recall", val_metrics['recall'])
+        mlflow.log_metric("val f1", val_metrics["f1"])
+
+        print("results on Val dataset")
+        print(val_metrics)
+
+        remote_server_uri= "https://dagshub.com/mb16biswas/mlops101.mlflow"
+        mlflow.set_tracking_uri(remote_server_uri)
+
+        if(register):
+
+            try:
+                
+                mlflow.sklearn.log_model(
+                    clf_tfidf, "model", registered_model_name= "Logistic_Regression"
+                )
+            except Exception as e:
+
+                print(e)
+                mlflow.sklearn.log_model(clf_tfidf, "model")   
+        
+        else:
+
+            mlflow.sklearn.log_model(clf_tfidf, "model")   
+
+        return clf_tfidf
 
 
 def eval_model(clf, X, y):
@@ -65,6 +129,7 @@ def split(random_state=42):
 
 
 def train():
+
     print('Loading data...')
     train_df = pd.read_csv(train_df_path)
     test_df = pd.read_csv(test_df_path)
@@ -77,31 +142,13 @@ def train():
     train_tfidf, test_tfidf, tfidf = fit_tfidf(train_df, test_df)
 
     print('Saving TFIDF object...')
-    joblib.dump(tfidf, 'outputs/tfidf.joblib')
+    
 
     print('Training model...')
     train_y = train_df[CLASS_LABEL]
-    model = fit_model(train_tfidf, train_y)
-
-    print('Saving trained model...')
-    joblib.dump(model, 'outputs/model.joblib')
-
-    print('Evaluating model...')
-    train_metrics = eval_model(model, train_tfidf, train_y)
-    print('Train metrics:')
-    print(train_metrics)
-
-    test_metrics = eval_model(model, test_tfidf, test_df[CLASS_LABEL])
-    print('Test metrics:')
-    print(test_metrics)
+    model = fit_model(train_tfidf, train_y,test_tfidf, test_df[CLASS_LABEL])
 
 
-# if __name__ == '__main__':
-#     parser = argparse.ArgumentParser()
-#     subparsers = parser.add_subparsers(title='Split or Train step:', dest='step')
-#     subparsers.required = True
-#     split_parser = subparsers.add_parser('split')
-#     split_parser.set_defaults(func=split)
-#     train_parser = subparsers.add_parser('train')
-#     train_parser.set_defaults(func=train)
-#     parser.parse_args().func()
+if __name__  == "__main__" :
+    
+    train()
